@@ -1,0 +1,3 @@
+[workspace]
+members = ["pvc_audio"
+, "pvc_core"]
