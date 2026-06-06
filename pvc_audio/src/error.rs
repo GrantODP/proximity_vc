@@ -1,6 +1,6 @@
 use cpal::{
-    BuildStreamError, DeviceIdError, DeviceNameError, DevicesError, StreamError,
-    SupportedStreamConfigsError,
+    BuildStreamError, DeviceIdError, DeviceNameError, DevicesError, PauseStreamError,
+    PlayStreamError, StreamError, SupportedStreamConfigsError,
 };
 use thiserror::Error;
 
@@ -32,4 +32,10 @@ pub enum AudioError {
 
     #[error("No info for audio device")]
     NoInfoForAudioDevice,
+
+    #[error("PlayStreamError")]
+    PlayStreamError(#[from] PlayStreamError),
+
+    #[error("PauseStreamError")]
+    PauseStreamError(#[from] PauseStreamError),
 }
