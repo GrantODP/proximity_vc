@@ -42,14 +42,16 @@ pub fn bits_per_sample(format: SampleFormat) -> u32 {
 
 #[derive(Clone)]
 pub struct AudioDevice<DeviceType> {
-    devtype: DeviceType,
+    pub devtype: DeviceType,
     pub device: cpal::Device,
     pub info: AudioDeviceInfo,
     pub level: DeviceLevel,
-    config: SupportedStreamConfig,
+    pub config: SupportedStreamConfig,
 }
 
+#[derive(Debug, Default, Clone)]
 pub struct Input;
+#[derive(Debug, Default, Clone)]
 pub struct Output;
 
 impl fmt::Debug for AudioDevice<Input> {
@@ -147,11 +149,11 @@ fn is_noise_device(name: &str, id: &str) -> bool {
     bad_names.iter().any(|n| name.contains(n)) || bad_prefixes.iter().any(|p| id.starts_with(p))
 }
 
-#[cfg(test)] // Compiles this module ONLY when running 'cargo test'
+#[cfg(test)]
 mod tests {
-    use super::*; // Brings the outer functions into scope
+    use super::*;
 
-    #[test] // Marks this specific function as a runnable test
+    #[test]
     fn test_view_devices() {
         let host = cpal::default_host();
         let devices = get_input_devices(&host);
@@ -160,7 +162,8 @@ mod tests {
             Ok(dev) => {
                 // let dev = filter_devices(dev);
                 for d in dev {
-                    println!("{:?}", d)
+                    println!("{:?}", d);
+                    println!("Channels: {}", d.config.channels());
                 }
             }
             Err(e) => println!("error: {:?}", e),
