@@ -1,16 +1,13 @@
-use std::{
-    ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
 use cpal::{
     Device, SampleFormat, Stream, StreamConfig, StreamError, SupportedStreamConfig,
-    traits::DeviceTrait,
+    traits::{DeviceTrait, StreamTrait},
 };
-use crossbeam::{deque::Steal, queue::SegQueue};
 
-use crate::{Result, error::AudioError, stream};
+use crate::{Result, error::AudioError};
 
+/// A slice of audio data in the format specified by the device/inputstream
 #[derive(Debug, Clone)]
 pub enum AudioSlice<'a> {
     I8(&'a [i8]),
@@ -18,6 +15,8 @@ pub enum AudioSlice<'a> {
     I32(&'a [i32]),
     F32(&'a [f32]),
 }
+
+/// A mutable slice of audio points used to write audio data to the output stream.
 #[derive(Debug)]
 pub enum AudioSliceMut<'a> {
     I8(&'a mut [i8]),
@@ -25,17 +24,23 @@ pub enum AudioSliceMut<'a> {
     I32(&'a mut [i32]),
     F32(&'a mut [f32]),
 }
-
+/// Types that need to receive memory points that can read data from the input stream and write data to the output stream.
 pub trait AudioSink: Send + Sync {
-    fn push(&self, slice: AudioSlice<'_>);
+    /// Called when audio data is read from the input stream.
+    fn on_read(&self, slice: AudioSlice<'_>);
+
+    /// Called when data can be written to the output stream.
+    /// Implementers will receive a mutable slice of memory points to write audio data to and output stream.
+    fn on_write(&self, slice: AudioSliceMut<'_>);
 }
 
-pub struct AudioDispatcher {
+struct AudioDispatcher {
     pub sinks: RwLock<Vec<Arc<dyn AudioSink>>>,
 }
+
 pub struct InputStreamHandle {
-    pub stream: Stream,
-    pub dispatcher: Arc<AudioDispatcher>,
+    stream: Stream,
+    dispatcher: Arc<AudioDispatcher>, //For all cases there should normaly be exactly of 2 references of the Dispatcher 1 owned by the handle and the other is owned by the stream callback
 }
 
 impl AudioDispatcher {
@@ -46,13 +51,46 @@ impl AudioDispatcher {
     }
     fn on_input(&self, slice: AudioSlice<'_>) {
         for sink in self.sinks.read().unwrap().iter() {
-            sink.push(slice.clone());
+            sink.on_read(slice.clone());
         }
     }
 
     fn push(&self, sink: Arc<dyn AudioSink>) {
         let mut w_guard = self.sinks.write().unwrap();
         w_guard.push(sink);
+    }
+}
+
+impl InputStreamHandle {
+    /// Pushes a sink to the dispatcher, so that it will receive audio data from the stream.
+    ///
+    /// # Arguments
+    ///
+    /// * `sink` - The sink to push.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Buffer implements [`AudioSink`]
+    /// let sink: Arc<dyn AudioSink> = Arc::new(Buffer::new());
+    /// let handle = build_input_handle(&device, config, |_| {}).unwrap();
+    /// handle.push_sink(sink.clone());
+    /// ```
+    pub fn push_sink(&self, sink: Arc<dyn AudioSink>) {
+        self.dispatcher.push(sink);
+    }
+
+    /// The stream will open and start running
+    pub fn play(&self) -> Result<()> {
+        Ok(self.stream.play()?)
+    }
+
+    pub fn pause(&self) -> Result<()> {
+        Ok(self.stream.pause()?)
+    }
+
+    pub fn stream(&self) -> &Stream {
+        &self.stream
     }
 }
 
@@ -180,7 +218,7 @@ where
 }
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, ops::Mul, sync::Mutex};
+    use std::sync::Mutex;
 
     use cpal::traits::{HostTrait, StreamTrait};
     use ringbuf::{
@@ -341,7 +379,7 @@ mod tests {
     }
 
     impl AudioSink for DispatchTester {
-        fn push(&self, slice: AudioSlice<'_>) {
+        fn on_read(&self, slice: AudioSlice<'_>) {
             let mut gaurd = self.data.lock().unwrap();
             match slice {
                 AudioSlice::I8(items) => todo!(),
@@ -353,6 +391,10 @@ mod tests {
                     }
                 }
             }
+        }
+
+        fn on_write(&self, slice: AudioSliceMut<'_>) {
+            todo!()
         }
     }
 
