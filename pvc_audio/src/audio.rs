@@ -6,7 +6,7 @@ use crate::{
     error::AudioError,
     stream::{self, AudioSink, AudioSlice},
 };
-use crossbeam::queue::ArrayQueue;
+use crossbeam::queue::{ArrayQueue, SegQueue};
 
 const AUDIOBUFFER_SIZE: usize = 48000 * 2;
 
@@ -234,13 +234,58 @@ impl InputReader for AudioFixedQueue {
         count
     }
 }
+
+pub struct AudioUnboundQueue {
+    pub channels: u32,
+    data: SegQueue<f32>,
+}
+
+impl AudioUnboundQueue {
+    pub fn new(channels: u32) -> Self {
+        Self {
+            channels,
+            data: SegQueue::new(),
+        }
+    }
+}
+
+impl InputWriter for AudioUnboundQueue {
+    fn write(&self, sample: f32) -> Result<()> {
+        self.data.push(sample);
+        Ok(())
+    }
+
+    fn write_slice(&self, slice: &[f32]) -> usize {
+        for sample in slice.iter() {
+            self.data.push(*sample);
+        }
+        slice.len()
+    }
+}
+impl InputReader for AudioUnboundQueue {
+    fn read(&self) -> Option<f32> {
+        self.data.pop()
+    }
+
+    fn read_slice(&self, slice: &mut [f32]) -> usize {
+        let mut count = 0;
+        for sample in slice.iter_mut() {
+            if let Some(s) = self.data.pop() {
+                *sample = s;
+                count += 1;
+            }
+        }
+        count
+    }
+}
+
 /// Represents the kind of buffer used by [`AudioBufferBuilder`] to build an [`AudioBuffer`].
 #[derive(Debug, Clone, Copy, Default)]
 pub enum BufferKind {
     #[default]
     Ring, // AudioRingBuffer
-    Fixed, // AudioFixedQueue
-    Grow,  //TODO
+    Fixed,   // AudioFixedQueue
+    Unbound, // AudioUnboundQueue
 }
 
 ///Container used by builders to return various AudioBuffer types.
@@ -248,6 +293,7 @@ pub enum BufferKind {
 pub enum AudioBuffers {
     Ring(AudioRingBuffer),
     Fixed(AudioFixedQueue),
+    Unbound(AudioUnboundQueue),
 }
 
 ///Builder for creating [`AudioBuffers`] of various kinds.
@@ -308,7 +354,11 @@ impl BufferBuilder<Input> {
                 let buff_type = AudioBuffers::Fixed(buff);
                 buff_type
             }
-            BufferKind::Grow => todo!(),
+            BufferKind::Unbound => {
+                let buff = AudioUnboundQueue::new(device.config.channels().into());
+                let buff_type = AudioBuffers::Unbound(buff);
+                buff_type
+            }
         }
     }
 }
@@ -371,6 +421,7 @@ mod tests {
         buffer.clear();
         assert!(buffer.read().is_none());
 
+        //overflow should overwrite oldest samples
         buffer.write_slice(&samples);
         let r = buffer.write(0.1);
         assert!(r.is_ok());
