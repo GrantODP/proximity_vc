@@ -130,6 +130,21 @@ impl AudioSink for AudioRingBuffer {
     fn on_write(&self, slice: stream::AudioSliceMut<'_>) {}
 }
 
+impl AudioSink for AudioFixedQueue {
+    fn on_read(&self, slice: AudioSlice<'_>) {
+        receive_audio(self, slice);
+    }
+
+    fn on_write(&self, slice: stream::AudioSliceMut<'_>) {}
+}
+impl AudioSink for AudioUnboundQueue {
+    fn on_read(&self, slice: AudioSlice<'_>) {
+        receive_audio(self, slice);
+    }
+
+    fn on_write(&self, slice: stream::AudioSliceMut<'_>) {}
+}
+
 impl InputReader for AudioRingBuffer {
     fn read(&self) -> Option<f32> {
         self.data.pop()
@@ -246,6 +261,10 @@ impl AudioUnboundQueue {
             channels,
             data: SegQueue::new(),
         }
+    }
+
+    pub fn clear(&mut self) {
+        while self.data.pop().is_some() {}
     }
 }
 
@@ -431,5 +450,24 @@ mod tests {
         let last = buffer.read();
         assert!(last.is_some());
         assert_eq!(last.unwrap(), 0.1);
+    }
+
+    #[test]
+    fn test_audio_unbound_buffer() {
+        let mut buffer = AudioUnboundQueue::new(2);
+        assert_eq!(buffer.channels, 2);
+        assert!(buffer.read().is_none());
+        buffer.write(0.5);
+        assert!(buffer.read().is_some());
+        buffer.write(0.5);
+        assert!(buffer.read().is_some());
+        assert!(buffer.read().is_none());
+
+        let slice = [0.5; 20];
+        buffer.write_slice(&slice);
+        assert!(buffer.read().is_some());
+
+        buffer.clear();
+        assert!(buffer.read().is_none());
     }
 }
