@@ -20,7 +20,7 @@ pub struct AudioRingBuffer {
     ///Number of channels in the buffer
     pub channels: u32,
     ///The underlying ring buffer
-    pub data: Arc<ArrayQueue<f32>>,
+    pub data: ArrayQueue<f32>,
 }
 
 impl AudioRingBuffer {
@@ -127,9 +127,7 @@ impl AudioSink for AudioRingBuffer {
         receive_audio(self, slice);
     }
 
-    fn on_write(&self, slice: stream::AudioSliceMut<'_>) {
-        todo!()
-    }
+    fn on_write(&self, slice: stream::AudioSliceMut<'_>) {}
 }
 
 impl InputReader for AudioRingBuffer {
@@ -188,16 +186,17 @@ impl InputWriter for AudioRingBuffer {
     }
 }
 
+#[derive(Debug)]
 pub struct AudioFixedQueue {
     channels: u32,
-    data: Arc<ArrayQueue<f32>>,
+    data: ArrayQueue<f32>,
 }
 
 impl AudioFixedQueue {
     pub fn new(channels: u32, capacity: usize) -> Self {
         Self {
             channels,
-            data: Arc::new(ArrayQueue::new(capacity)),
+            data: ArrayQueue::new(capacity),
         }
     }
 }
@@ -240,14 +239,15 @@ impl InputReader for AudioFixedQueue {
 pub enum BufferKind {
     #[default]
     Ring, // AudioRingBuffer
-    FixedQueue, //TODO
-    GrowQueue,  //TODO
+    Fixed, // AudioFixedQueue
+    Grow,  //TODO
 }
 
 ///Container used by builders to return various AudioBuffer types.
 /// Used to simplify the creation of buffers that require eithe
 pub enum AudioBuffers {
     Ring(AudioRingBuffer),
+    Fixed(AudioFixedQueue),
 }
 
 ///Builder for creating [`AudioBuffers`] of various kinds.
@@ -303,8 +303,12 @@ impl BufferBuilder<Input> {
                 let buff_type = AudioBuffers::Ring(buff);
                 buff_type
             }
-            BufferKind::FixedQueue => todo!(),
-            BufferKind::GrowQueue => todo!(),
+            BufferKind::Fixed => {
+                let buff = AudioFixedQueue::new(device.config.channels().into(), self.buffer_size);
+                let buff_type = AudioBuffers::Fixed(buff);
+                buff_type
+            }
+            BufferKind::Grow => todo!(),
         }
     }
 }
