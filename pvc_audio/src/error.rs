@@ -38,4 +38,7 @@ pub enum AudioError {
 
     #[error("PauseStreamError")]
     PauseStreamError(#[from] PauseStreamError),
+
+    #[error("AudioBufferFull")]
+    AudioBufferFull,
 }
