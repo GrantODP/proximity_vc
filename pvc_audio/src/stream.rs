@@ -30,7 +30,7 @@ pub trait AudioSink: Send + Sync {
     fn on_read(&self, slice: AudioSlice<'_>);
 
     /// Called when data can be written to the output stream.
-    /// Implementers will receive a mutable slice of memory points to write audio data to and output stream.
+    /// Will receive a mutable slice of memory points to write audio data to the output stream.
     fn on_write(&self, slice: AudioSliceMut<'_>);
 }
 
@@ -410,12 +410,12 @@ mod tests {
         })
         .unwrap();
         let test = Arc::new(DispatchTester::new());
-        in_stream.dispatcher.deref().push(test.clone());
+        in_stream.dispatcher.push(test.clone());
         in_stream.stream.play().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(100));
         in_stream.stream.pause();
         let g = test.data.lock().unwrap();
-        let d = g.deref();
+        let d = g;
         println!("Data\n{:?}", d)
     }
 }

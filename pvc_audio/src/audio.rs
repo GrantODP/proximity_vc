@@ -10,17 +10,17 @@ use crossbeam::queue::ArrayQueue;
 
 const AUDIOBUFFER_SIZE: usize = 48000 * 2;
 
-///Ring buffer for f32 audio samples
+///Ring buffer for f32 audio samples.
 ///This buffer is used to store audio samples for processing.
 ///User can write audio samples directly to buffer using [`InputWriter`] trait.
-///However the primary use to insert audio samples from an input stream in [`InputStream`]
-///[`AudioRingBuffer`] is uses a MPMPC queue as its underlying container.
+///However the primary use is to insert audio samples from an input stream in [`InputStream`]
+///[`AudioRingBuffer`] is uses a MPMC queue as its underlying container.
 #[derive(Debug)]
 pub struct AudioRingBuffer {
     ///Number of channels in the buffer
     pub channels: u32,
     ///The underlying ring buffer
-    pub data: ArrayQueue<f32>,
+    data: ArrayQueue<f32>,
 }
 
 impl AudioRingBuffer {
@@ -188,7 +188,7 @@ impl InputWriter for AudioRingBuffer {
 
 #[derive(Debug)]
 pub struct AudioFixedQueue {
-    channels: u32,
+    pub channels: u32,
     data: ArrayQueue<f32>,
 }
 
@@ -310,5 +310,75 @@ impl BufferBuilder<Input> {
             }
             BufferKind::Grow => todo!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_fixed_queue() {
+        let queue = AudioFixedQueue::new(2, 20);
+        assert_eq!(queue.channels, 2);
+        assert_eq!(queue.data.capacity(), 20);
+        assert!(queue.data.is_empty());
+
+        let samples = [0.5; 20];
+        let r = queue.write(samples[0]);
+        assert!(r.is_ok());
+        assert!(!queue.data.is_empty());
+        assert_eq!(queue.data.len(), 1);
+
+        let r = queue.write_slice(&samples[1..20]);
+        assert!(r == 19);
+
+        let r = queue.write(0.0);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_audio_ring_buffer() {
+        let mut buffer = AudioRingBuffer::new(2, 20);
+        assert_eq!(buffer.channels, 2);
+        // assert_eq!(buffer.data.capacity(), 20);
+        // assert!(buffer.data.is_empty());
+
+        let samples = [0.5; 20];
+        buffer.write_slice(&samples);
+        while let Some(v) = buffer.read() {
+            assert_eq!(v, 0.5)
+        }
+        // assert!(!buffer.data.is_empty());
+        // assert_eq!(buffer.data.len(), 20);
+
+        let first = buffer.read();
+        if let Some(first) = first {
+            assert_eq!(first, 0.5);
+        } else {
+            panic!("Expected first sample to be Some(0.5)");
+        }
+        while let Some(v) = buffer.read() {
+            assert_eq!(v, 0.5)
+        }
+        let samples = [0.5; 20];
+        buffer.write_slice(&samples);
+
+        let mut second_pops = [0.0; 5];
+        buffer.read_slice(&mut second_pops);
+        assert_eq!(second_pops, [0.5; 5]);
+
+        buffer.clear();
+        assert!(buffer.read().is_none());
+
+        buffer.write_slice(&samples);
+        let r = buffer.write(0.1);
+        assert!(r.is_ok());
+        let mut old_samples = [0.0; 19];
+        let count = buffer.read_slice(&mut old_samples);
+        assert_eq!(count, 19);
+        let last = buffer.read();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap(), 0.1);
     }
 }
