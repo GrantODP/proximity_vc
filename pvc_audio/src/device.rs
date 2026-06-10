@@ -1,7 +1,7 @@
 use std::fmt;
 
 use cpal::{
-    Device, Host, SampleFormat, SupportedStreamConfig,
+    Device, DeviceId, Host, SampleFormat, SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait},
 };
 
@@ -74,13 +74,13 @@ fn get_device_configs(device: &Device) -> Result<SupportedStreamConfig> {
     let config_range = device
         .supported_input_configs()?
         .next()
-        .ok_or(AudioError::NoInfoForAudioDevice)?;
+        .ok_or(AudioError::NoInfoForAudioDevice(device.to_string()))?;
     let config = config_range.with_max_sample_rate();
 
     return Ok(config);
 }
 
-fn get_input_devices(host: &Host) -> Result<Vec<AudioDevice<Input>>> {
+pub fn get_input_devices(host: &Host) -> Result<Vec<AudioDevice<Input>>> {
     let mut devices: Vec<AudioDevice<Input>> = vec![];
     for device in host.input_devices()? {
         let config = match get_device_configs(&device) {
@@ -91,7 +91,7 @@ fn get_input_devices(host: &Host) -> Result<Vec<AudioDevice<Input>>> {
         };
         let sample_format = config.sample_format();
         let info = AudioDeviceInfo {
-            id: device.id()?.1,
+            id: device.id()?.id().into(),
             name: device.description()?.name().into(),
             bits_per_sample: bits_per_sample(sample_format),
         };
@@ -107,7 +107,7 @@ fn get_input_devices(host: &Host) -> Result<Vec<AudioDevice<Input>>> {
     Ok(devices)
 }
 
-fn get_output_devices(host: &Host) -> Result<Vec<AudioDevice<Output>>> {
+pub fn get_output_devices(host: &Host) -> Result<Vec<AudioDevice<Output>>> {
     let mut devices: Vec<AudioDevice<Output>> = vec![];
     for device in host.output_devices()? {
         let config = match get_device_configs(&device) {
@@ -118,7 +118,7 @@ fn get_output_devices(host: &Host) -> Result<Vec<AudioDevice<Output>>> {
         };
         let sample_format = config.sample_format();
         let info = AudioDeviceInfo {
-            id: device.id()?.1,
+            id: device.id()?.id().into(),
             name: device.description()?.name().into(),
             bits_per_sample: bits_per_sample(sample_format),
         };

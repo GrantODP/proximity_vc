@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cpal = "0.17.3"
+cpal = { version = "0.18", features = ["pulseaudio"] }
 crossbeam = "0.8.4"
 ringbuf = "0.5.0"
 thiserror = "2.0.18"
