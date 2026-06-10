@@ -1,11 +1,11 @@
 use std::sync::{Arc, RwLock};
 
 use cpal::{
-    Device, SampleFormat, Stream, StreamConfig, StreamError, SupportedStreamConfig,
+    Device, FromSample, Sample, SampleFormat, Stream, StreamConfig, SupportedStreamConfig,
     traits::{DeviceTrait, StreamTrait},
 };
 
-use crate::{Result, error::AudioError};
+use crate::{Result, error::AudioError, traits::AudioSink};
 
 /// A slice of audio data in the format specified by the device/inputstream
 #[derive(Debug, Clone)]
@@ -14,6 +14,13 @@ pub enum AudioSlice<'a> {
     I16(&'a [i16]),
     I32(&'a [i32]),
     F32(&'a [f32]),
+    I24(&'a [i32]),
+    U24(&'a [u32]),
+    I64(&'a [i64]),
+    U64(&'a [u64]),
+    DsdU8(&'a [u8]),
+    DsdU16(&'a [u16]),
+    DsdU32(&'a [u32]),
 }
 
 /// A mutable slice of audio points used to write audio data to the output stream.
@@ -23,15 +30,13 @@ pub enum AudioSliceMut<'a> {
     I16(&'a mut [i16]),
     I32(&'a mut [i32]),
     F32(&'a mut [f32]),
-}
-/// Types that need to receive memory points that can read data from the input stream and write data to the output stream.
-pub trait AudioSink: Send + Sync {
-    /// Called when audio data is read from the input stream.
-    fn on_read(&self, slice: AudioSlice<'_>);
-
-    /// Called when data can be written to the output stream.
-    /// Will receive a mutable slice of memory points to write audio data to the output stream.
-    fn on_write(&self, slice: AudioSliceMut<'_>);
+    I24(&'a mut [i32]),
+    U24(&'a mut [u32]),
+    I64(&'a mut [i64]),
+    U64(&'a mut [u64]),
+    DsdU8(&'a mut [u8]),
+    DsdU16(&'a mut [u16]),
+    DsdU32(&'a mut [u32]),
 }
 
 struct AudioDispatcher {
@@ -41,6 +46,10 @@ struct AudioDispatcher {
 pub struct InputStreamHandle {
     stream: Stream,
     dispatcher: Arc<AudioDispatcher>, //For all cases there should normaly be exactly of 2 references of the Dispatcher 1 owned by the handle and the other is owned by the stream callback
+}
+
+pub struct OutputStreamHandle {
+    stream: Stream,
 }
 
 impl AudioDispatcher {
@@ -93,6 +102,20 @@ impl InputStreamHandle {
         &self.stream
     }
 }
+impl OutputStreamHandle {
+    /// The stream will open and start running
+    pub fn play(&self) -> Result<()> {
+        Ok(self.stream.play()?)
+    }
+
+    pub fn pause(&self) -> Result<()> {
+        Ok(self.stream.pause()?)
+    }
+
+    pub fn stream(&self) -> &Stream {
+        &self.stream
+    }
+}
 
 pub fn build_input_handle<E>(
     device: &Device,
@@ -100,7 +123,7 @@ pub fn build_input_handle<E>(
     on_err: E,
 ) -> Result<InputStreamHandle>
 where
-    E: FnMut(StreamError) + Send + 'static,
+    E: FnMut(cpal::Error) + Send + 'static,
 {
     let dispatcher = Arc::new(AudioDispatcher::new());
     let dsp2 = dispatcher.clone();
@@ -118,7 +141,25 @@ where
         dispatcher: dsp2,
     })
 }
-
+pub fn build_output_handle<E>(
+    device: &Device,
+    config: SupportedStreamConfig,
+    buffer: Arc<dyn AudioSink>,
+    on_err: E,
+) -> Result<OutputStreamHandle>
+where
+    E: FnMut(cpal::Error) + Send + 'static,
+{
+    let stream = build_output_stream(
+        device,
+        config,
+        move |slice| {
+            buffer.on_write(slice);
+        },
+        on_err,
+    )?;
+    Ok(OutputStreamHandle { stream: stream })
+}
 pub fn build_input_stream<D, E>(
     device: &Device,
     config: SupportedStreamConfig,
@@ -127,33 +168,75 @@ pub fn build_input_stream<D, E>(
 ) -> Result<Stream>
 where
     D: FnMut(AudioSlice<'_>) + Send + 'static,
-    E: FnMut(StreamError) + Send + 'static,
+    E: FnMut(cpal::Error) + Send + 'static,
 {
     let format = config.sample_format();
     let stream_config: StreamConfig = config.into();
 
     let stream = match format {
         SampleFormat::I8 => device.build_input_stream(
-            &stream_config,
+            stream_config,
             move |data: &[i8], _| on_data(AudioSlice::I8(data)),
             on_err,
             None,
         )?,
         SampleFormat::I16 => device.build_input_stream(
-            &stream_config,
+            stream_config,
             move |data: &[i16], _| on_data(AudioSlice::I16(data)),
             on_err,
             None,
         )?,
+        SampleFormat::I24 => device.build_input_stream(
+            stream_config,
+            move |data: &[i32], _| on_data(AudioSlice::I24(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::U24 => device.build_input_stream(
+            stream_config,
+            move |data: &[u32], _| on_data(AudioSlice::U24(data)),
+            on_err,
+            None,
+        )?,
         SampleFormat::I32 => device.build_input_stream(
-            &stream_config,
+            stream_config,
             move |data: &[i32], _| on_data(AudioSlice::I32(data)),
             on_err,
             None,
         )?,
         SampleFormat::F32 => device.build_input_stream(
-            &stream_config,
+            stream_config,
             move |data: &[f32], _| on_data(AudioSlice::F32(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::I64 => device.build_input_stream(
+            stream_config,
+            move |data: &[i64], _| on_data(AudioSlice::I64(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::U64 => device.build_input_stream(
+            stream_config,
+            move |data: &[u64], _| on_data(AudioSlice::U64(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::DsdU8 => device.build_input_stream(
+            stream_config,
+            move |data: &[u8], _| on_data(AudioSlice::DsdU8(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::DsdU16 => device.build_input_stream(
+            stream_config,
+            move |data: &[u16], _| on_data(AudioSlice::DsdU16(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::DsdU32 => device.build_input_stream(
+            stream_config,
+            move |data: &[u32], _| on_data(AudioSlice::DsdU32(data)),
             on_err,
             None,
         )?,
@@ -176,33 +259,75 @@ pub fn build_output_stream<D, E>(
 ) -> Result<Stream>
 where
     D: FnMut(AudioSliceMut<'_>) + Send + 'static,
-    E: FnMut(StreamError) + Send + 'static,
+    E: FnMut(cpal::Error) + Send + 'static,
 {
     let format = config.sample_format();
     let stream_config: StreamConfig = config.into();
 
     let stream = match format {
         SampleFormat::I8 => device.build_output_stream(
-            &stream_config,
+            stream_config,
             move |data: &mut [i8], _| on_data(AudioSliceMut::I8(data)),
             on_err,
             None,
         )?,
         SampleFormat::I16 => device.build_output_stream(
-            &stream_config,
+            stream_config,
             move |data: &mut [i16], _| on_data(AudioSliceMut::I16(data)),
             on_err,
             None,
         )?,
+        SampleFormat::I24 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [i32], _| on_data(AudioSliceMut::I24(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::U24 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [u32], _| on_data(AudioSliceMut::U24(data)),
+            on_err,
+            None,
+        )?,
         SampleFormat::I32 => device.build_output_stream(
-            &stream_config,
+            stream_config,
             move |data: &mut [i32], _| on_data(AudioSliceMut::I32(data)),
             on_err,
             None,
         )?,
         SampleFormat::F32 => device.build_output_stream(
-            &stream_config,
+            stream_config,
             move |data: &mut [f32], _| on_data(AudioSliceMut::F32(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::I64 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [i64], _| on_data(AudioSliceMut::I64(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::U64 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [u64], _| on_data(AudioSliceMut::U64(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::DsdU8 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [u8], _| on_data(AudioSliceMut::DsdU8(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::DsdU16 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [u16], _| on_data(AudioSliceMut::DsdU16(data)),
+            on_err,
+            None,
+        )?,
+        SampleFormat::DsdU32 => device.build_output_stream(
+            stream_config,
+            move |data: &mut [u32], _| on_data(AudioSliceMut::DsdU32(data)),
             on_err,
             None,
         )?,
@@ -319,9 +444,15 @@ mod tests {
                 AudioSlice::I16(slice) => {
                     println!("Got {} i16 samples {:?}", slice.len(), &slice[0..5])
                 }
-                _ => {
-                    println!("Got ???");
-                }
+                AudioSlice::I8(items) => todo!(),
+                AudioSlice::I32(items) => todo!(),
+                AudioSlice::I24(items) => {}
+                AudioSlice::U24(items) => todo!(),
+                AudioSlice::I64(items) => todo!(),
+                AudioSlice::U64(items) => todo!(),
+                AudioSlice::DsdU8(items) => todo!(),
+                AudioSlice::DsdU16(items) => todo!(),
+                AudioSlice::DsdU32(items) => todo!(),
             },
             |err| eprintln!("Stream error: {err}"),
         )
@@ -390,6 +521,13 @@ mod tests {
                         gaurd.push(*f);
                     }
                 }
+                AudioSlice::I24(items) => todo!(),
+                AudioSlice::U24(items) => todo!(),
+                AudioSlice::I64(items) => todo!(),
+                AudioSlice::U64(items) => todo!(),
+                AudioSlice::DsdU8(items) => todo!(),
+                AudioSlice::DsdU16(items) => todo!(),
+                AudioSlice::DsdU32(items) => todo!(),
             }
         }
 
